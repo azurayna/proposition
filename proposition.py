@@ -6,7 +6,7 @@ import streamlit as st
 # from proposition_logic import check_proof
 
 st.set_page_config(page_title="Proof Checker", layout="centered")
-st.title("🧮 Proof Checker Prototype")
+st.title(";* Propositional Proof Checker (Prototype)")
 st.write("Enter your proof below (one step per line).")
 
 # Text area for user input
