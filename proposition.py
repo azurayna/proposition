@@ -1,3 +1,25 @@
+# --- Streamlit wrapper ---
+import streamlit as st
+
+# If your proof-checking functions are in the same file, no import needed
+# Otherwise, import them like:
+# from proposition_logic import check_proof
+
+st.set_page_config(page_title="Proof Checker", layout="centered")
+st.title("🧮 Proof Checker Prototype")
+st.write("Enter your proof below (one step per line).")
+
+# Text area for user input
+proof_text = st.text_area("Proof steps:", height=250, value="")
+
+# Button triggers proof checking
+if st.button("Check Proof"):
+    try:
+        # Call your existing proof-checking function
+        result = check_proof(proof_text)  # <- keep your original function
+        st.success(result)
+    except Exception as e:
+        st.error(f"Error: {e}")
 # Minimal propositional proof checker prototype
 # - Supports atoms (uppercase letters), parentheses, operators: ~ (not), & (and), | (or), -> (implication)
 # - Proof format: list of steps (dicts). Step fields:
