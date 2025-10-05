@@ -8,7 +8,7 @@ st.markdown("""
 html, body, [class*="css"] { font-family: 'Times New Roman', serif; }
 
 /* Text area / code input: Monospace */
-textarea, input, .stTextArea, .stTextInput { font-family: 'Courier New', monospace; }
+textarea, input, .stTextArea, .stTextInput { font-family: 'Times New Roman', monospace; }
 </style>
 """, unsafe_allow_html=True)
 
