@@ -1,5 +1,29 @@
-# --- Streamlit wrapper ---
+# Streamlit wrapper
 import streamlit as st
+
+# CSS
+st.markdown("""
+<style>
+/* Outer text: Times New Roman */
+html, body, [class*="css"] { font-family: 'Times New Roman', serif; }
+
+/* Text area / code input: Monospace */
+textarea, input, .stTextArea, .stTextInput { font-family: 'Courier New', monospace; }
+</style>
+""", unsafe_allow_html=True)
+
+st.set_page_config(page_title="Proof Checker", layout="centered")
+st.title("🧮 Proof Checker")
+st.write("Enter your proof below (one step per line):")
+
+proof_text = st.text_area("Proof steps:", height=250, value="")
+
+if st.button("Check Proof"):
+    try:
+        result = check_proof(proof_text)  # your original function
+        st.success(result)
+    except Exception as e:
+        st.error(f"Error: {e}")
 
 # If your proof-checking functions are in the same file, no import needed
 # Otherwise, import them like:
