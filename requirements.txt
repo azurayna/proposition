@@ -1,3 +1,4 @@
-# requirements.txt
-streamlit
-python
+streamlit>=1.30.0
+sympy>=1.12
+pandas>=2.0.0
+rich>=13.0.0
