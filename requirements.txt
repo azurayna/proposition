@@ -1,7 +1,4 @@
 # requirements.txt
 streamlit
-sympy
-pandas
 rich
-re
 python
