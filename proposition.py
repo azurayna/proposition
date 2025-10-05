@@ -380,3 +380,21 @@ bad_proof = [
 ]
 print("\n=== Demo 3: malformed proof (expect error) ===")
 try_proof(bad_proof)
+
+def check_proof(proof_text: str) -> str:
+    """
+    Wrapper for your existing proof-processing code.
+    Input: proof_text as multiline string
+    Output: string result of proof checking
+    """
+    lines = proof_text.strip().split("\n")
+    
+    try:
+        for i, line in enumerate(lines):
+            # Example check: make sure each line has at least a character
+            if not line.strip():
+                return f"Error: Line {i+1} is empty"
+        return "Proof processed successfully!"  # <- replace with actual check
+    except Exception as e:
+        return f"Error: {e}"
+
