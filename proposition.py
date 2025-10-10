@@ -1,5 +1,10 @@
-# Streamlit wrapper
+# streamlit_proof_checker.py
 import streamlit as st
+import json
+import traceback
+
+# Page config must be first
+st.set_page_config(page_title="Proof Checker", layout="centered")
 
 # CSS
 st.markdown("""
@@ -7,38 +12,39 @@ st.markdown("""
 /* Outer text: Times New Roman */
 html, body, [class*="css"] { font-family: 'Times New Roman', serif; }
 
-/* Text area / code input: Monospace */
+/* Text area / code input: Monospace fallback */
 textarea, input, .stTextArea, .stTextInput { font-family: 'Times New Roman', monospace; }
 </style>
 """, unsafe_allow_html=True)
 
-st.set_page_config(page_title="Proof Checker", layout="centered")
-st.title(";* Propositional Proof Checker (Prototype)")
-st.write("Enter your proof below (one step per line).")
+st.title("Propositional Proof Checker (Prototype)")
+st.write("Paste a JSON array of proof steps (one list entry per step). See the example below and the demo proofs in the console.")
 
-# Text area for user input
-proof_text = st.text_area("Proof steps:", height=250, value="")
+# Example JSON (helpful default)
+example = json.dumps([
+    {"id": 1, "formula": "(P & Q)", "rule": "premise"},
+    {"id": 2, "formula": "P", "rule": "and_elim", "refs": [1]}
+], indent=2)
 
-# Button triggers proof checking
+proof_text = st.text_area("Proof steps (JSON):", height=300, value=example)
+
 if st.button("Check Proof"):
     try:
-        # Call your existing proof-checking function
-        result = check_proof(proof_text)  # <- keep your original function
-        st.success(result)
+        result = check_proof(proof_text)
+        if isinstance(result, dict) and result.get("ok"):
+            st.success(result["message"])
+            st.subheader("Final validated environment")
+            # display as simple table
+            for sid, f in sorted(result["env"].items()):
+                st.write(f"{sid}: {f}")
+        else:
+            # error returned as string
+            st.error(result if isinstance(result, str) else str(result))
     except Exception as e:
-        st.error(f"Error: {e}")
-# Minimal propositional proof checker prototype
-# - Supports atoms (uppercase letters), parentheses, operators: ~ (not), & (and), | (or), -> (implication)
-# - Proof format: list of steps (dicts). Step fields:
-#     id: int
-#     formula: string (parsed)
-#     rule: 'premise' | 'assume' | 'and_elim' | 'and_intro' | 'imp_elim' | 'imp_intro'
-#     refs: list of referenced step ids (optional)
-#     subproof: list of steps (optional) for rules like imp_intro
-#
-# This is intentionally small and readable. It checks structure and simple rule side-conditions.
-# Run the demo proofs at the bottom to see it in action.
+        st.error("Internal error: " + str(e))
+        st.text(traceback.format_exc())
 
+# ----- (Below this line is your proof-checker implementation; unchanged except for imports used above) -----
 import re
 from dataclasses import dataclass
 from typing import List, Tuple, Optional, Dict, Any
@@ -50,7 +56,7 @@ class Formula:
     val: Optional[str] = None
     left: Optional['Formula'] = None
     right: Optional['Formula'] = None
-    
+
     def __str__(self):
         if self.kind == 'atom':
             return self.val
@@ -162,21 +168,21 @@ class ProofChecker:
     def __init__(self, steps: List[Dict[str, Any]]):
         self.raw_steps = steps
         self.env: Dict[int, Formula] = {}  # validated formulas by id
-    
+
     def parse_step_formula(self, step):
         try:
             return parse_formula(step['formula'])
         except ParserError as e:
             raise ProofError(f"Parsing error in step {step.get('id')}: {e}")
-    
+
     def lookup(self, ref_id: int) -> Formula:
         if ref_id not in self.env:
             raise ProofError(f"Reference to unknown or unchecked step id {ref_id}")
         return self.env[ref_id]
-    
+
     def formulas_equal(self, f1: Formula, f2: Formula) -> bool:
         return f1 == f2  # dataclass equality works since fields are structural
-    
+
     def check_and_elim(self, step_formula: Formula, refs: List[int]):
         if len(refs) != 1:
             raise ProofError("and_elim needs exactly 1 reference")
@@ -186,7 +192,7 @@ class ProofChecker:
         if self.formulas_equal(step_formula, conj.left) or self.formulas_equal(step_formula, conj.right):
             return True
         raise ProofError("and_elim target is not a conjunct of referenced conjunction")
-    
+
     def check_and_intro(self, step_formula: Formula, refs: List[int]):
         if len(refs) != 2:
             raise ProofError("and_intro needs exactly 2 references")
@@ -200,7 +206,7 @@ class ProofChecker:
         if self.formulas_equal(step_formula, expected2):
             return True
         raise ProofError("and_intro target does not match conjunction of refs")
-    
+
     def check_imp_elim(self, step_formula: Formula, refs: List[int]):
         if len(refs) != 2:
             raise ProofError("imp_elim (MP) needs exactly 2 references: A and A->B")
@@ -216,34 +222,24 @@ class ProofChecker:
         if self.formulas_equal(step_formula, imp.right):
             return True
         raise ProofError("imp_elim target does not match implication consequent")
-    
+
     def check_imp_intro(self, step: Dict[str, Any]):
-        # expects a 'subproof' list where first step is an 'assume' of A and last step is B; infers A->B equals step['formula']
         if 'subproof' not in step:
             raise ProofError("imp_intro requires a 'subproof' field containing the subproof steps")
         sub = step['subproof']
         if len(sub) == 0:
             raise ProofError("empty subproof")
-        # check the subproof locally with a new checker that allows the assumption to be present in env
-        # first step must be assume
         if sub[0].get('rule') != 'assume':
             raise ProofError("first step of subproof must be an 'assume' introducing the antecedent")
         assumed_formula = parse_formula(sub[0]['formula'])
-        # create a checker for the subproof that inherits global env but allows the assumption id to be present
+        # create a checker for the subproof that inherits global env but allows the assumption to be present
         local_checker = ProofChecker([])
-        # copy global validated formulas into local env (so subproof can reference them)
         local_checker.env = dict(self.env)
-        # assign a synthetic id for the assumption inside the subproof
-        # process steps with ids starting at a high offset to avoid clashes; but we will just treat refs as local ids
-        # For simplicity, renumber subproof steps sequentially starting at 1 for lookup
-        renum = {}
-        local_env_ids = {}
         new_steps = []
         for i, s in enumerate(sub, start=1):
             s_copy = dict(s)
             s_copy['id'] = i
             new_steps.append(s_copy)
-        # run through new_steps, allowing 'assume' to add the assumed_formula to env
         for s in new_steps:
             fid = s['id']
             rule = s.get('rule')
@@ -251,14 +247,11 @@ class ProofChecker:
             if rule == 'assume':
                 local_checker.env[fid] = f
                 continue
-            # handle rules supported inside subproof: premise, assume, and_elim, and_intro, imp_elim
             if rule == 'premise':
                 local_checker.env[fid] = f
                 continue
             if rule == 'and_elim':
                 refs = s.get('refs', [])
-                # map refs: if they are >0 and refer to subproof numbering, keep as is; else allow references to global by string 'G:ID'
-                # For simplicity, assume refs refer to local numbering if <= len(new_steps), else error
                 local_checker.check_and_elim(f, refs)
                 local_checker.env[fid] = f
                 continue
@@ -272,23 +265,25 @@ class ProofChecker:
                 local_checker.check_imp_elim(f, refs)
                 local_checker.env[fid] = f
                 continue
+            if rule == 'imp_intro':
+                # recursion for nested imp_intro
+                local_checker.check_imp_intro(s)
+                local_checker.env[fid] = f
+                continue
             raise ProofError(f"Unsupported rule '{rule}' inside subproof")
-        # after local checking, the last formula is the subproof conclusion
         conclusion = local_checker.env[len(new_steps)]
-        # now check that the top-level step formula equals (assumed_formula -> conclusion)
         expected_imp = Formula('imp', left=assumed_formula, right=conclusion)
         declared = self.parse_step_formula(step)
         if self.formulas_equal(declared, expected_imp):
             return True
         raise ProofError("imp_intro target formula does not equal implication from assumed antecedent to subproof conclusion")
-    
+
     def check_step(self, step: Dict[str, Any]):
         rule = step.get('rule')
         if not rule:
             raise ProofError("missing rule in step")
         f = self.parse_step_formula(step)
         if rule == 'premise':
-            # accept any formula
             return f
         if rule == 'assume':
             return f
@@ -308,9 +303,8 @@ class ProofChecker:
             self.check_imp_intro(step)
             return f
         raise ProofError(f"Unknown or unsupported rule '{rule}'")
-    
+
     def run(self):
-        # top-level steps processed sequentially; ids must be unique integers
         for step in self.raw_steps:
             sid = step.get('id')
             if not isinstance(sid, int):
@@ -318,83 +312,32 @@ class ProofChecker:
             if sid in self.env:
                 raise ProofError(f"duplicate step id {sid}")
             checked_formula = self.check_step(step)
-            # on success, store in env
             self.env[sid] = checked_formula
         return True
 
-# --- Demo proofs ---
-proof1 = [
-    {"id":1, "formula":"(P & Q)", "rule":"premise"},
-    {"id":2, "formula":"P", "rule":"and_elim", "refs":[1]}
-]
+# Top-level wrapper: read JSON and run
+def check_proof(proof_text: str):
+    """
+    Input: proof_text (JSON array of step dicts)
+    Output: dict with ok/message and environment on success; else error string
+    """
+    try:
+        steps = json.loads(proof_text)
+    except Exception as e:
+        return f"JSON parsing error: {e}"
 
-# Proof of P -> (Q -> P) using nested subproofs
-proof2 = [
-    {"id":1, "formula":"(P -> (Q -> P))", "rule":"premise"},  # we will instead *construct* it using imp_intro, so show intended as target
-]
+    if not isinstance(steps, list):
+        return "Input must be a JSON array (list) of proof steps."
 
-# Let's construct the imp_intro proof as a top-level step with a subproof
-proof_imp = [
-    {"id":1, "formula":"(P -> (Q -> P))", "rule":"imp_intro", "subproof":[
-        {"id":101, "formula":"P", "rule":"assume"},
-        {"id":102, "formula":"(Q -> P)", "rule":"imp_intro", "subproof":[
-            {"id":201, "formula":"Q", "rule":"assume"},
-            {"id":202, "formula":"P", "rule":"assume"}  # here we assume P from outer scope; for demo, we mark it as assume again
-        ]}
-    ]}
-]
-
-# For the nested imp_intro demo above, our simple subproof checker expects local renumbered ids and direct structure
-# Let's build a correct version: outer subproof assumes P, inner subproof assumes Q and reuses P by asserting it via a referent.
-# To keep it simple for this prototype, we allow the inner to 'assume' P as well and conclude P.
-proof_imp_simple = [
-    {"id":1, "formula":"(P -> (Q -> P))", "rule":"imp_intro", "subproof":[
-        {"id":1, "formula":"P", "rule":"assume"},
-        {"id":2, "formula":"(Q -> P)", "rule":"imp_intro", "subproof":[
-            {"id":1, "formula":"Q", "rule":"assume"},
-            {"id":2, "formula":"P", "rule":"assume"}
-        ]}
-    ]}
-]
-
-def try_proof(steps):
     try:
         pc = ProofChecker(steps)
-        ok = pc.run()
-        print("Proof accepted. Final environment:")
-        for k,v in sorted(pc.env.items()):
-            print(f"  {k}: {v}")
+        pc.run()
+        # return environment as map sid -> str(formula)
+        env_readable = {sid: str(f) for sid, f in pc.env.items()}
+        return {"ok": True, "message": "Proof accepted.", "env": env_readable}
     except ProofError as e:
-        print("Proof error:", e)
-
-print("=== Demo 1: and_elim ===")
-try_proof(proof1)
-print("\n=== Demo 2: implication introduction (nested) - simple variant ===")
-try_proof(proof_imp_simple)
-
-# Example of a malformed proof to show error messaging
-bad_proof = [
-    {"id":1, "formula":"(P & Q)", "rule":"premise"},
-    {"id":2, "formula":"Q", "rule":"and_elim", "refs":[1]},  # actually Q is fine; try a wrong target
-    {"id":3, "formula":"R", "rule":"and_elim", "refs":[1]}   # wrong: R not a conjunct
-]
-print("\n=== Demo 3: malformed proof (expect error) ===")
-try_proof(bad_proof)
-
-def check_proof(proof_text: str) -> str:
-    """
-    Wrapper for your existing proof-processing code.
-    Input: proof_text as multiline string
-    Output: string result of proof checking
-    """
-    lines = proof_text.strip().split("\n")
-    
-    try:
-        for i, line in enumerate(lines):
-            # Example check: make sure each line has at least a character
-            if not line.strip():
-                return f"Error: Line {i+1} is empty"
-        return "Proof processed successfully!"  # <- replace with actual check
+        tb = traceback.format_exc()
+        return f"Proof error: {e}\n\nTraceback:\n{tb}"
     except Exception as e:
-        return f"Error: {e}"
-
+        tb = traceback.format_exc()
+        return f"Unexpected error: {e}\n\nTraceback:\n{tb}"
